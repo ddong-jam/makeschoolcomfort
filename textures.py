@@ -185,7 +185,7 @@ def stadium_path(g, cx, cy, w, l):
     g.closePath()
 
 
-def soccer_field(fw, fd):
+def soccer_field(fw, fd, courts=()):
     """운동장: 바깥 잔디 + 트랙 + 안쪽 인조잔디 축구장 (1m = 16px)"""
     ppm = 16
     W, H = fw * ppm, fd * ppm
@@ -222,6 +222,20 @@ def soccer_field(fw, fd):
     g.beginPath(); g.arc(cx, cy, 0.12 * pl, 0, math.tau); g.stroke()
     g.fillStyle = "white"
     g.beginPath(); g.arc(cx, cy, 3, 0, math.tau); g.fill()
+    for x0, x1, y0, y1 in courts:  # 트랙 안 양쪽 끝 모래 코트 (위성사진)
+        X0, Y0, Wc, Hc = x0 * ppm, y0 * ppm, (x1 - x0) * ppm, (y1 - y0) * ppm
+        g.fillStyle = "#d8c49c"
+        g.fillRect(X0, Y0, Wc, Hc)
+        speckle(g, W, H, 0, [])
+        g.strokeStyle = "rgba(255,255,255,0.7)"
+        g.lineWidth = 2
+        cw_, ch_ = min(28, x1 - x0 - 2) * ppm, min(15, y1 - y0 - 2) * ppm  # 농구 코트 라인
+        cx_, cy_ = X0 + Wc / 2, Y0 + Hc / 2
+        g.strokeRect(cx_ - cw_ / 2, cy_ - ch_ / 2, cw_, ch_)
+        g.beginPath(); g.moveTo(cx_, cy_ - ch_ / 2); g.lineTo(cx_, cy_ + ch_ / 2); g.stroke()
+        g.beginPath(); g.arc(cx_, cy_, 1.8 * ppm, 0, math.tau); g.stroke()
+    g.strokeStyle = "rgba(255,255,255,0.92)"
+    g.lineWidth = 2.2
     for end, sign in ((top, 1), (top + pl, -1)):
         bw, bd = 0.6 * pw, 0.18 * pl
         gw, gd = 0.3 * pw, 0.07 * pl

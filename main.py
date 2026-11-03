@@ -386,7 +386,7 @@ def tile_mat(tex, **kw):
 # ---------- 바닥 ----------
 grass_tex = tx.grass("#6a8f4a")
 grass_mat = tile_mat(grass_tex)
-paver_mat = tile_mat(tx.pavers("#c4c0b7", "rgba(0,0,0,0.08)"))
+paver_mat = tile_mat(tx.pavers("#8f908d", "rgba(0,0,0,0.10)"))  # 학교 안 길·마당: 위성사진처럼 회색
 asphalt_mat = tile_mat(tx.asphalt(), rough=0.95)
 concrete_mat = tile_mat(tx.concrete(), rough=0.95)
 walk_mat = tile_mat(tx.pavers("#bdb2a6", "rgba(0,0,0,0.10)", 4))
@@ -436,8 +436,8 @@ tz_poly = None
 
 # 그림이 하나뿐인 바닥들 (운동장, 중정 등)
 fw, fd = cd.FIELD[1] - cd.FIELD[0], cd.FIELD[3] - cd.FIELD[2]
-plane(cd.FIELD, tile_mat(tx.soccer_field(fw, fd)), 0.1)
-plane(cd.COURT, tile_mat(tx.basketball_court(cd.COURT[1] - cd.COURT[0], cd.COURT[3] - cd.COURT[2]), rough=0.7), 0.13)
+plane(cd.FIELD, tile_mat(tx.soccer_field(fw, fd, cd.FIELD_COURTS)), 0.1)
+
 plane(cd.PARKING, tile_mat(tx.parking(cd.PARKING[1] - cd.PARKING[0], cd.PARKING[3] - cd.PARKING[2]),
                            rough=0.95), 0.1)
 plane(cd.PLAZA, tile_mat(tx.plaza(cd.PLAZA[1] - cd.PLAZA[0])), 0.1)
@@ -510,30 +510,91 @@ def trimmed(road_i, end, by):
     return pts
 
 
-road_lines = [list(r["pts"]) for r in cd.ROADS]
-for side_i, end, main_i in cd.JOINS:  # 곁길은 큰길 인도 바깥에서 멈추고, 입구만 아스팔트로 잇는다
-    road_lines[side_i] = trimmed(side_i, end, cd.ROADS[main_i]["w"] / 2 + 3)
+def sub_line(pts, s0, s1):
+    """꺾은선에서 길이 s0~s1 m 부분만 잘라낸다"""
+    out, acc = [], 0.0
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        L = math.hypot(x1 - x0, y1 - y0)
+        for s_ in (s0, s1):
+            pass
+        a_, b_ = max(s0, acc), min(s1, acc + L)
+        if a_ < b_:
+            p0 = (x0 + (x1 - x0) * (a_ - acc) / L, y0 + (y1 - y0) * (a_ - acc) / L)
+            p1 = (x0 + (x1 - x0) * (b_ - acc) / L, y0 + (y1 - y0) * (b_ - acc) / L)
+            if not out or math.hypot(out[-1][0] - p0[0], out[-1][1] - p0[1]) > 0.01:
+                out.append(p0)
+            out.append(p1)
+        acc += L
+    return out
+
+
+def line_len(pts):
+    return sum(math.hypot(b_[0] - a_[0], b_[1] - a_[1]) for a_, b_ in zip(pts, pts[1:]))
+
+
+def proj_s(pts, X, Y):
+    """점이 꺾은선의 처음에서 몇 m 지점인지"""
+    best, acc, s_best = 1e9, 0.0, 0.0
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        L = math.hypot(x1 - x0, y1 - y0)
+        t = max(0, min(1, ((X - x0) * (x1 - x0) + (Y - y0) * (y1 - y0)) / (L * L)))
+        dd = math.hypot(X - x0 - t * (x1 - x0), Y - y0 - t * (y1 - y0))
+        if dd < best:
+            best, s_best = dd, acc + t * L
+        acc += L
+    return s_best
+
+
+# 인도에서 비워 둘 구간: (길 번호, 쪽(+1 왼쪽/-1 오른쪽), 시작 m, 끝 m)
+walk_gaps = {}
+for side_i, end, main_i in cd.JOINS:
+    side_pts = cd.ROADS[side_i]["pts"]
+    jx, jy = side_pts[0] if end == 0 else side_pts[-1]
+    ox, oy = side_pts[1] if end == 0 else side_pts[-2]
+    main_pts = cd.ROADS[main_i]["pts"]
+    sj = proj_s(main_pts, jx, jy)
+    # 곁길이 큰길의 어느 쪽으로 뻗는지
+    k = max(0, min(len(main_pts) - 2, next((i for i in range(len(main_pts) - 1)
+                                            if proj_s(main_pts[:i + 2], jx, jy) < line_len(main_pts[:i + 2]) - 0.01),
+                                           len(main_pts) - 2)))
+    (ax, ay), (bx, by) = main_pts[k], main_pts[k + 1]
+    sgn = 1 if (bx - ax) * (oy - ay) - (by - ay) * (ox - ax) > 0 else -1
+    g = cd.ROADS[side_i]["w"] / 2 + 3
+    walk_gaps.setdefault(main_i, []).append((sgn, sj - g, sj + g))
+    walk_gaps.setdefault(side_i, []).append((0, 0, cd.ROADS[main_i]["w"] / 2 + 3) if end == 0 else
+                                            (0, line_len(side_pts) - cd.ROADS[main_i]["w"] / 2 - 3, 1e9))
+
+
+def walk_pieces(i, sgn):
+    """인도 조각들 (교차로 입구는 비움)"""
+    pts = cd.ROADS[i]["pts"]
+    total = line_len(pts)
+    cuts = sorted((a_, b_) for s_, a_, b_ in walk_gaps.get(i, []) if s_ in (0, sgn))
+    pieces, start = [], 0.0
+    for a_, b_ in cuts:
+        if a_ > start + 0.5:
+            pieces.append(sub_line(pts, start, a_))
+        start = max(start, b_)
+    if start < total - 0.5:
+        pieces.append(sub_line(pts, start, total))
+    return [p for p in pieces if len(p) >= 2]
+
 
 for i, road in enumerate(cd.ROADS):
-    pts, w = road_lines[i], road["w"]
+    pts, w = road["pts"], road["w"]
     half = w / 2
     add_geo("asphalt", asphalt_mat, ribbon(pts, -half, half, 0.05, 10), cast=False)
+    add_geo("earth", earth_mat, ribbon(pts, -half - 3, half + 3, -4, 10), cast=False)  # 받침 바닥
     for sgn in (1, -1):
-        add_geo("walk", walk_mat, ribbon(pts, sgn * half, sgn * (half + 3), 0.15, 2), cast=False)
-        add_geo("earth", earth_mat, wall_strip(pts, sgn * (half + 3), -4, 0.15), cast=False)
+        for piece in walk_pieces(i, sgn):
+            add_geo("walk", walk_mat, ribbon(piece, sgn * half, sgn * (half + 3), 0.15, 2), cast=False)
+            add_geo("earth", earth_mat, wall_strip(piece, sgn * (half + 3), -4, 0.15), cast=False)
     if w >= 14:  # 큰 길: 가운데 노란 겹선
         for off in (-0.25, 0.1):
             add_geo("yellow", line_mat, ribbon(pts, off, off + 0.15, 0.08, 1), cast=False)
-    else:
-        add_geo("yellow", line_mat, ribbon(pts, -0.08, 0.08, 0.08, 1), cast=False)
-    add_geo("earth", earth_mat, ribbon(pts, -half - 3, half + 3, -4, 10), cast=False)  # 받침 바닥
-
-for side_i, end, main_i in cd.JOINS:  # 교차로 입구: 큰길 쪽 인도를 덮는 아스팔트
-    full = cd.ROADS[side_i]["pts"]
-    a = full[0] if end == 0 else full[-1]
-    b = road_lines[side_i][0] if end == 0 else road_lines[side_i][-1]
-    add_geo("asphalt", asphalt_mat, ribbon([a, b], -cd.ROADS[side_i]["w"] / 2, cd.ROADS[side_i]["w"] / 2, 0.17, 10),
-            cast=False)
+    else:  # 좁은 길: 노란 중앙선 (큰길에 들어가기 전까지)
+        for piece in walk_pieces(i, 0):
+            add_geo("yellow", line_mat, ribbon(piece, -0.08, 0.08, 0.08, 1), cast=False)
 
 
 def crosswalk(road, X, Y):
@@ -803,11 +864,13 @@ add_geo("white", white, g_box(sx, 4.2, sz, sw + 1.5, 0.2, sd))
 for k in range(0, int(sd), 10):
     add_geo("post", post_mat, THREE.CylinderGeometry.new(0.1, 0.1, 4.2, 8).translate(sx - sw / 2, 2.1, sz - sd / 2 + k))
 
-C_ = cd.COURT  # 농구 골대 (코트 양 끝)
-for gx_ in (C_[0] + 1.2, C_[1] - 1.2):
-    cyl(wx(gx_), 1.7, wz((C_[2] + C_[3]) / 2), 0.09, 3.4, post_mat, 8)
-    box(wx(gx_ + (0.9 if gx_ < (C_[0] + C_[1]) / 2 else -0.9)), 3.4, wz((C_[2] + C_[3]) / 2), 0.05, 1.05, 1.8,
-        std(color="#ffffff", rough=0.3))
+for x0, x1, y0, y1 in cd.FIELD_COURTS:  # 운동장 양쪽 끝 코트의 농구 골대
+    cy_ = cd.FIELD[3] - (y0 + y1) / 2
+    cxm = cd.FIELD[0] + (x0 + x1) / 2
+    half = min(28, x1 - x0 - 2) / 2
+    for gx_, sgn in ((cxm - half - 0.6, 1), (cxm + half + 0.6, -1)):
+        cyl(wx(gx_), 1.7, wz(cy_), 0.09, 3.4, post_mat, 8)
+        box(wx(gx_ + sgn * 1.0), 3.3, wz(cy_), 0.05, 1.05, 1.8, std(color="#ffffff", rough=0.3))
 
 pcx, pcz, _, _ = rect_cs(cd.PLAZA)
 stone = std(color="#cfc9bd", rough=0.85)
@@ -969,7 +1032,7 @@ for m in (body_mesh, cabin_mesh, wheel_mesh):
 # ---------- 나무 ----------
 blocked = [expand(b["rect"], 3.5) for b in cd.BUILDINGS]
 blocked += [expand(r, 2) for r in cd.CORRIDORS] + paved
-blocked += [expand(cd.FIELD, 2), expand(cd.COURT, 2), expand(cd.STANDS, 2), *garden_paths, expand(cd.BACK_PATH, 1.5)]
+blocked += [expand(cd.FIELD, 2), expand(cd.STANDS, 2), *garden_paths, expand(cd.BACK_PATH, 1.5)]
 blocked += [expand(r[:4], 4) for r in cd.OTHER_SCHOOL]
 blocked += [expand((s0, s1, t0, t1), 4) for s0, s1, t0, t1, _ in cd.SLABS]
 trees = []  # (X, Y, 종류, 크기)

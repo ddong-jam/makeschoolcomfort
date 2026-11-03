@@ -365,6 +365,14 @@ def _inside(X, Y, poly, margin=1.2):
     return True
 
 
+for _b in BUILDINGS:
+    if _b["id"] == "toilet":
+        _b["rect"] = (60.5, 66, 129.5, 134.5)   # 운동장 북서쪽 모서리, 트랙 바로 바깥 (청록 지붕)
+    if _b["id"] == "guard":
+        _b["rect"] = (32, 38, 136, 141)         # 정문 옆 수위실
+GATES = [GATES[0], (44, _y_on(offset_line(HWA_PTS, -13), 44))]  # 정문: 만대관 쪽 길이 시작하는 곳
+FIELD_COURTS = [(9, 52, 1.5, 27), (43, 79, 137.5, 154.5)]   # 운동장 안 양쪽 끝 모래 코트 (서쪽·북쪽 끝에서 m)
+
 # 건물이 울타리 밖(길 위)으로 나가면 안쪽으로 조금씩 밀어 넣는다
 _cx = sum(p[0] for p in CAMPUS) / len(CAMPUS)
 _cy = sum(p[1] for p in CAMPUS) / len(CAMPUS)

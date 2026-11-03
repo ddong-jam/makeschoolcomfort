@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>광덕 캠퍼스 3D</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="https://pyscript.net/releases/2024.11.1/core.css">
+  <script type="importmap">
+    {"imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }}
+  </script>
+  <script type="module">
+    import * as THREE from "three";
+    import { MapControls } from "three/addons/controls/MapControls.js";
+    import { Sky } from "three/addons/objects/Sky.js";
+    import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+    // 오류가 나면 화면에 그대로 보여 준다 (원인을 알려 주기 쉽게)
+    const showError = (msg) => {
+      let box = document.getElementById("errbox");
+      if (!box) {
+        box = document.createElement("pre");
+        box.id = "errbox";
+        document.body.appendChild(box);
+      }
+      box.textContent += "오류: " + msg + "\n";
+    };
+    window.addEventListener("error", (e) => showError(e.message || String(e.error)));
+    window.addEventListener("unhandledrejection", (e) => showError(String(e.reason)));
+    window.MapControls = MapControls;
+    window.Sky = Sky;
+    window.mergeGeometries = mergeGeometries;
+    window.THREE = THREE;
+  </script>
+  <script type="module" src="https://pyscript.net/releases/2024.11.1/core.js"></script>
+  <style>
+    :root {
+      --panel: rgba(255, 255, 255, 0.86);
+      --line: rgba(20, 30, 45, 0.08);
+      --text: #1d2733;
+      --muted: #6b7682;
+      --accent: #2f6fde;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #dfe6ec; color: var(--text);
+      font-family: "Pretendard", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+    #view { position: fixed; inset: 0; }
+    #view canvas { display: block; cursor: grab; }
+    #view canvas:active { cursor: grabbing; }
+    .panel { position: fixed; background: var(--panel); backdrop-filter: blur(14px) saturate(1.4);
+      -webkit-backdrop-filter: blur(14px) saturate(1.4); border: 1px solid var(--line);
+      border-radius: 14px; box-shadow: 0 8px 30px rgba(20, 30, 45, 0.12); }
+
+    #controls { top: 14px; left: 14px; padding: 14px 16px; max-width: calc(100vw - 28px); }
+    h1 { font-size: 16px; font-weight: 700; margin: 0 0 10px; letter-spacing: -0.2px; }
+    h1 small { font-weight: 500; color: var(--muted); font-size: 12px; margin-left: 4px; }
+    #mode { color: #c25e00; }
+    .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+    .row > span { font-size: 12px; color: var(--muted); width: 32px; }
+    .seg { display: inline-flex; background: rgba(20, 30, 45, 0.06); border-radius: 9px; padding: 3px; gap: 2px; }
+    button { font: inherit; font-size: 13px; color: var(--text); background: transparent; border: 0;
+      border-radius: 7px; padding: 6px 11px; cursor: pointer; transition: background .15s, color .15s; }
+    button:hover { background: rgba(255, 255, 255, 0.8); }
+    button.active { background: #fff; color: var(--accent); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+    #labels { background: rgba(20, 30, 45, 0.06); }
+    #labels.active { background: var(--accent); color: #fff; }
+
+    #info { right: 14px; top: 14px; width: 270px; padding: 16px 18px; }
+    #info h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
+    #info ul { margin: 10px 0 6px; padding: 0; list-style: none; font-size: 14px; }
+    #info li { padding: 7px 0; border-bottom: 1px solid var(--line); }
+    #info li:last-child { border-bottom: 0; }
+    .tag { margin: 0; font-size: 12px; color: var(--muted); }
+    .note { font-size: 12px; color: var(--muted); margin: 8px 0 0; line-height: 1.6; }
+    .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 12px; color: var(--muted); margin-top: 10px; }
+    .keys b { color: var(--text); font-weight: 600; }
+
+    .plan-btn { margin-top: 6px; width: 100%; background: var(--accent); color: #fff; font-weight: 600; padding: 9px; border-radius: 9px; }
+    .plan-btn:hover { background: #2559b8; }
+    .plan-btn:disabled { background: #c9ced4; }
+    #plan { position: fixed; inset: 0; display: none; place-items: center; background: rgba(15, 20, 28, 0.55); z-index: 7; }
+    #plan .box { width: min(1200px, 94vw); height: 90vh; background: #fff; border-radius: 14px; overflow: hidden;
+      display: grid; grid-template-rows: auto 1fr; box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+    #plan header { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+    #plan header b { font-size: 15px; }
+    #plan-close { background: rgba(20,30,45,.08); }
+    #plan iframe { width: 100%; height: 100%; border: 0; }
+    .back-btn { background: rgba(20,30,45,.07); margin-bottom: 8px; }
+    .floor-row { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
+    .floor-btn { background: rgba(20,30,45,.07); min-width: 46px; font-weight: 600; }
+    .floor-btn.active { background: var(--accent); color: #fff; }
+    .sel-box { background: #eef4ff; border-radius: 10px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+    .chip::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 4px;
+      vertical-align: -1px; background: var(--c); border: 1px solid rgba(0,0,0,.2); }
+    .pdf-btn { margin-top: 8px; font-size: 12px; color: var(--muted); background: rgba(20,30,45,.05); }
+    #nav { right: 14px; bottom: 14px; padding: 6px; display: grid; grid-template-columns: repeat(3, 38px); gap: 4px; }
+    .slide { grid-column: 1 / -1; display: grid; gap: 2px; font-size: 12px; color: var(--muted); padding: 2px 4px; }
+    .slide input { width: 100%; accent-color: var(--accent); }
+    #nav button { width: 38px; height: 38px; padding: 0; font-size: 17px; border-radius: 9px; }
+
+    #tip { position: fixed; display: none; pointer-events: none; background: rgba(24, 32, 44, 0.88); color: #fff;
+      font-size: 13px; padding: 5px 9px; border-radius: 7px; z-index: 4; }
+    #loading { position: fixed; inset: 0; display: grid; place-items: center; white-space: pre-line; text-align: center; padding: 24px; line-height: 1.6; background: #dfe6ec; color: #445; font-size: 15px; z-index: 5; }
+    #lost { position: fixed; inset: 0; display: none; place-items: center; text-align: center; background: rgba(223,230,236,0.96); font-size: 16px; z-index: 6; }
+    #lost a { color: var(--accent); font-weight: 700; }
+    #errbox { position: fixed; left: 14px; right: 14px; bottom: 14px; max-height: 40vh; overflow: auto; z-index: 9;
+      background: #fff3f3; color: #a00; border: 1px solid #e99; border-radius: 10px; padding: 10px; font-size: 12px; white-space: pre-wrap; }
+    footer { left: 14px; bottom: 14px; padding: 7px 12px; font-size: 11px; color: var(--muted); max-width: calc(100vw - 180px); }
+    @media (max-width: 680px) {
+      #info { top: auto; bottom: 64px; left: 14px; right: 14px; width: auto; max-height: 38vh; overflow: auto; }
+      #nav { grid-template-columns: repeat(5, 38px); }
+      footer, .keys { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="view"></div>
+
+  <div id="controls" class="panel">
+    <h1>광덕고·광덕중 캠퍼스 3D<small>테스트 <span id="mode"></span></small></h1>
+    <div class="row">
+      <span>보기</span>
+      <div class="seg">
+        <button class="view" data-view="입체">입체</button>
+        <button class="view" data-view="위">위에서</button>
+        <button class="view" data-view="옆">옆에서</button>
+        <button class="view" data-view="정문">정문에서</button>
+      </div>
+      <button id="labels" class="active">이름표</button>
+    </div>
+    <div class="row">
+      <span>학교</span>
+      <div class="seg">
+        <button class="school active" data-school="전체">전체</button>
+        <button class="school" data-school="고등">고등학교</button>
+        <button class="school" data-school="중학교">중학교</button>
+        <button class="school" data-school="공용">공용</button>
+      </div>
+    </div>
+  </div>
+
+  <aside id="info" class="panel"></aside>
+
+  <div id="nav" class="panel">
+    <button class="nav" data-nav="left" title="왼쪽으로 돌리기">↺</button>
+    <button class="nav" data-nav="in" title="확대">＋</button>
+    <button class="nav" data-nav="right" title="오른쪽으로 돌리기">↻</button>
+    <button class="nav" data-nav="home" title="처음 위치">⌂</button>
+    <button class="nav" data-nav="out" title="축소">－</button>
+    <label class="slide">↻ 돌리기<input id="spin" type="range" min="-180" max="180" value="0"></label>
+    <label class="slide">⤢ 기울기<input id="tilt" type="range" min="10" max="88" value="45"></label>
+  </div>
+
+  <footer class="panel">건물 위치는 카카오맵 위성사진, 벽돌 외벽·정문 모양은 카카오맵 로드뷰를 참고했어요.</footer>
+
+  <div id="plan"><div class="box">
+    <header><b id="plan-title">평면도</b><button id="plan-close">닫기 ✕</button></header>
+    <iframe id="plan-frame" title="층 평면도"></iframe>
+  </div></div>
+
+  <div id="tip"></div>
+  <div id="loading">3D 캠퍼스 만드는 중... (처음엔 10~20초 걸려요)</div>
+  <div id="lost"><div>그래픽카드가 3D 화면을 멈췄어요.<br><br>
+    <a href="?lite=1&safe=1">안전 모드로 다시 열기</a> · <a href="./">기본 모드로 다시 열기</a></div></div>
+
+  <!-- ?v= 숫자는 파일을 고칠 때마다 올린다 (브라우저가 옛날 파일을 쓰지 않게) -->
+  <script type="py" src="./main.py?v=17" config='{"files": {"./campus_data.py?v=17": "./campus_data.py", "./textures.py?v=17": "./textures.py", "./floors.py?v=17": "./floors.py"}}'></script>
+</body>
+</html>

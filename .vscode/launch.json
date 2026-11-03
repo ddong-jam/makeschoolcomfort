@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "3D 캠퍼스 (가벼운 모드)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8123/?lite=1",
+      "preLaunchTask": "3D 캠퍼스 서버 켜기"
+    },
+    {
+      "name": "3D 캠퍼스 (기본 모드)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:8123/",
+      "preLaunchTask": "3D 캠퍼스 서버 켜기"
+    }
+  ]
+}

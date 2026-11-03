@@ -256,3 +256,130 @@ LANDMARKS = [
     ("CU 광덕고후문점", 130, south_road_y(130) - 10, "place"),
     ("광덕중고 운동장", 116, 70, "place"),
 ]
+
+
+# ===== v1.2: 길 모양을 위성사진대로 다시, 울타리는 길에서 계산 =====
+def offset_line(pts, d):
+    """꺾은선을 왼쪽(+)/오른쪽(-)으로 d m 평행이동 (모서리는 이어지게)"""
+    import math as _m
+    out = []
+    n = len(pts)
+    for i in range(n):
+        segs = []
+        if i > 0:
+            segs.append((pts[i - 1], pts[i]))
+        if i < n - 1:
+            segs.append((pts[i], pts[i + 1]))
+        normals = []
+        for (x0, y0), (x1, y1) in segs:
+            L = _m.hypot(x1 - x0, y1 - y0)
+            normals.append((-(y1 - y0) / L, (x1 - x0) / L))
+        mx = sum(v[0] for v in normals)
+        my = sum(v[1] for v in normals)
+        ml = _m.hypot(mx, my)
+        mx, my = mx / ml, my / ml
+        k = d / (mx * normals[0][0] + my * normals[0][1])
+        out.append((pts[i][0] + mx * k, pts[i][1] + my * k))
+    return out
+
+
+WEST_PTS = [(-73.6, 129.6), (-53.1, 55), (-37.5, -3.6), (-16.6, -42.6), (7.8, -91.4), (15.5, -119.6)]
+HWA_PTS = [(-95, 129.2), (-73.6, 129.6), (38.6, 152.5), (155.6, 189), (200, 192.5)]
+YEOM_PTS = [(-30, -119.3), (15.5, -119.6), (180, -112), (200, -109.5)]
+ROADS = [
+    {"name": "화정로", "w": 20, "pts": HWA_PTS},
+    {"name": "월드컵4강로133번길", "w": 8, "pts": WEST_PTS},
+    {"name": "염화로", "w": 14, "pts": YEOM_PTS},
+]
+JOINS = [(1, 0, 0), (1, -1, 2)]  # (곁길 번호, 곁길의 끝(0=처음, -1=끝), 만나는 큰길 번호)
+
+
+def _y_on(pts, X):
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        if X <= x1:
+            return y0 + (y1 - y0) * (X - x0) / (x1 - x0)
+    return pts[-1][1]
+
+
+west_edge = offset_line(WEST_PTS, 4 + 2.5)[1:-1]           # 서쪽 길의 동쪽 인도 끝
+north_edge = [p for p in offset_line(HWA_PTS, -(10 + 3)) if west_edge[0][0] < p[0] < 167]
+south_edge = [p for p in offset_line(YEOM_PTS, 7 + 3) if west_edge[-1][0] < p[0] < 167]
+CAMPUS = ([(west_edge[0][0], _y_on(offset_line(HWA_PTS, -13), west_edge[0][0]))] + north_edge
+          + [(167, _y_on(offset_line(HWA_PTS, -13), 167)), (167, _y_on(offset_line(YEOM_PTS, 10), 167))]
+          + south_edge[::-1] + [(west_edge[-1][0], _y_on(offset_line(YEOM_PTS, 10), west_edge[-1][0]))]
+          + west_edge[::-1])
+GATES = [(107, _y_on(offset_line(YEOM_PTS, 10), 107)), (58, _y_on(offset_line(HWA_PTS, -13), 58))]
+BACK_PATH = (103.5, 110.5, GATES[0][1] - 1, -10)   # 후문에서 운동장까지 길 (위성사진)
+MINI_PITCH = None                                   # 후문 옆 작은 축구장은 없앰
+COURT = (92, 128, 124, 142)                         # 운동장 북쪽 끝 농구장 (배치도·위성사진)
+LANDMARKS = [
+    ("화정로", -20, _y_on(HWA_PTS, -20), "road"),
+    ("염화로", 80, _y_on(YEOM_PTS, 80), "road"),
+    ("월드컵4강로133번길", -45, 25, "road"),
+    ("광덕고 정문", GATES[1][0], GATES[1][1], "gate"),
+    ("광덕고 후문", GATES[0][0], GATES[0][1], "gate"),
+    ("버스정류장 염주맨션", 140, _y_on(YEOM_PTS, 140) + 6, "bus"),
+    ("CU 광덕고후문점", 115, _y_on(YEOM_PTS, 115) - 10, "place"),
+    ("농구장", 110, 133, "place"),
+]
+
+
+def _cross_y(line_pts, y_of_edge):
+    """꺾은선을 따라가다 다른 길 가장자리(y_of_edge)와 만나는 점"""
+    for (x0, y0), (x1, y1) in zip(line_pts, line_pts[1:]):
+        for k in range(41):
+            t = k / 40
+            x, y = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
+            if abs(y - y_of_edge(x)) < 0.6:
+                return (x, y)
+    return line_pts[0]
+
+
+_W = offset_line(WEST_PTS, 6.5)
+_N = offset_line(HWA_PTS, -13)
+_S = offset_line(YEOM_PTS, 10)
+_nw = _cross_y(_W, lambda x: _y_on(_N, x))
+_sw = _cross_y(_W[::-1], lambda x: _y_on(_S, x))
+CAMPUS = ([_nw] + [p for p in _N if _nw[0] < p[0] < 167] + [(167, _y_on(_N, 167)), (167, _y_on(_S, 167))]
+          + [p for p in _S[::-1] if _sw[0] < p[0] < 167] + [_sw]
+          + [p for p in _W[::-1] if _sw[1] < p[1] < _nw[1]])
+
+
+def _inside(X, Y, poly, margin=1.2):
+    hit = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > Y) != (y2 > Y) and X < x1 + (Y - y1) * (x2 - x1) / (y2 - y1):
+            hit = not hit
+    if not hit:
+        return False
+    import math as _m
+    for i in range(n):
+        (x1, y1), (x2, y2) = poly[i], poly[(i + 1) % n]
+        dx, dy = x2 - x1, y2 - y1
+        t = max(0, min(1, ((X - x1) * dx + (Y - y1) * dy) / (dx * dx + dy * dy)))
+        if _m.hypot(X - x1 - t * dx, Y - y1 - t * dy) < margin:
+            return False
+    return True
+
+
+# 건물이 울타리 밖(길 위)으로 나가면 안쪽으로 조금씩 밀어 넣는다
+_cx = sum(p[0] for p in CAMPUS) / len(CAMPUS)
+_cy = sum(p[1] for p in CAMPUS) / len(CAMPUS)
+for _b in BUILDINGS:
+    x0, x1, y0, y1 = _b["rect"]
+    for _ in range(80):
+        if all(_inside(X, Y, CAMPUS) for X, Y in ((x0, y0), (x1, y0), (x0, y1), (x1, y1))):
+            break
+        # 밖으로 나간 모서리 쪽 변만 0.4m씩 안으로
+        if not (_inside(x0, y0, CAMPUS) and _inside(x0, y1, CAMPUS)) and x0 < _cx:
+            x0 += 0.4
+        if not (_inside(x1, y0, CAMPUS) and _inside(x1, y1, CAMPUS)) and x1 > _cx:
+            x1 -= 0.4
+        if not (_inside(x0, y0, CAMPUS) and _inside(x1, y0, CAMPUS)) and y0 < _cy:
+            y0 += 0.4
+        if not (_inside(x0, y1, CAMPUS) and _inside(x1, y1, CAMPUS)) and y1 > _cy:
+            y1 -= 0.4
+    _b["rect"] = (round(x0, 1), round(x1, 1), round(y0, 1), round(y1, 1))

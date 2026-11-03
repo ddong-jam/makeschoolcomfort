@@ -420,7 +420,7 @@ campus_geo.translate(0, 0.04, 0)
 add_geo("grass", grass_mat, campus_geo, cast=False)
 
 paved = [expand(b["rect"], 4) for b in cd.BUILDINGS if b["floors"] >= 2]
-paved += [cd.LANE, cd.PARKING, (cd.GATES[0][0] - 6, cd.GATES[0][0] + 6, cd.GATES[0][1] - 1, -98)]  # 후문 길
+paved += [cd.LANE, cd.PARKING, cd.BACK_PATH]  # 후문에서 운동장으로 가는 길 (위성사진)
 for r in paved:
     add_geo("paver", paver_mat, g_plane(r, 0.07, 2), cast=False)
 
@@ -437,48 +437,103 @@ tz_poly = None
 # 그림이 하나뿐인 바닥들 (운동장, 중정 등)
 fw, fd = cd.FIELD[1] - cd.FIELD[0], cd.FIELD[3] - cd.FIELD[2]
 plane(cd.FIELD, tile_mat(tx.soccer_field(fw, fd)), 0.1)
-plane(cd.MINI_PITCH, tile_mat(tx.mini_pitch(cd.MINI_PITCH[1] - cd.MINI_PITCH[0],
-                                            cd.MINI_PITCH[3] - cd.MINI_PITCH[2])), 0.1)
+plane(cd.COURT, tile_mat(tx.basketball_court(cd.COURT[1] - cd.COURT[0], cd.COURT[3] - cd.COURT[2]), rough=0.7), 0.13)
 plane(cd.PARKING, tile_mat(tx.parking(cd.PARKING[1] - cd.PARKING[0], cd.PARKING[3] - cd.PARKING[2]),
                            rough=0.95), 0.1)
 plane(cd.PLAZA, tile_mat(tx.plaza(cd.PLAZA[1] - cd.PLAZA[0])), 0.1)
 
 
-# ---------- 학교 둘레 도로 (위성사진 위치) ----------
-# 학교 땅처럼 두께 있는 받침 위에 아스팔트·인도·차선·횡단보도를 올린다
+# ---------- 학교 둘레 도로 (위성사진 모양) ----------
+# 길 하나를 조각 없이 이어진 띠 하나로 만든다 (꺾이는 곳도 겹치지 않게)
+from js import Float32Array
+
 line_mat = std(color="#e3c04a", rough=0.8)
 white_line_mat = std(color="#ecebe6", rough=0.8)
-earth_mat = std(color="#8f8068", rough=0.95)
-curb_mat = std(color="#c9c5bc", rough=0.9)
-for road in cd.ROADS:
-    pts, w = road["pts"], road["w"]
-    full = w + 6  # 차도 + 양쪽 인도 3m
+earth_mat = std(color="#8f8068", rough=0.95, side=THREE.DoubleSide)
+for _m in (asphalt_mat, walk_mat, line_mat):
+    _m.side = THREE.DoubleSide  # 띠는 앞뒤 어느 쪽에서도 보이게
+
+
+def ribbon(pts, d0, d1, y, tile):
+    """꺾은선 pts를 따라 왼쪽 d0~d1 m 사이를 채운 띠 (모서리는 이어 붙임)"""
+    a, b = cd.offset_line(pts, d0), cd.offset_line(pts, d1)
+    pos, uv, idx = [], [], []
+    s = 0.0
+    for i in range(len(pts)):
+        if i:
+            s += math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])
+        for p, v in ((a[i], 0), (b[i], abs(d1 - d0))):
+            pos += [wx(p[0]), y, wz(p[1])]
+            uv += [s / tile, v / tile]
     for i in range(len(pts) - 1):
-        (X0, Y0), (X1, Y1) = pts[i], pts[i + 1]
-        L = math.hypot(X1 - X0, Y1 - Y0)
-        rot = math.atan2(Y1 - Y0, X1 - X0)
-        mx, my = (X0 + X1) / 2, (Y0 + Y1) / 2
-        add_geo("earth", earth_mat, g_box(wx(mx), -2, wz(my), L + full * 0.6, 4, full, rot), cast=False)
-        add_geo("asphalt", asphalt_mat, g_seg(pts[i], pts[i + 1], w, 0.05, 10, extend=w * 0.6), cast=False)
-        for side in (1, -1):
-            off = side * (w / 2 + 1.5)
-            add_geo("walk", walk_mat, g_seg(pts[i], pts[i + 1], 3, 0.15, 2, offset=off, extend=w * 0.6),
-                    cast=False)
-            nx, ny = -(Y1 - Y0) / L, (X1 - X0) / L
-            cx_, cy_ = mx + nx * side * (w / 2 + 0.1), my + ny * side * (w / 2 + 0.1)
-            add_geo("curb", curb_mat, g_box(wx(cx_), 0.08, wz(cy_), L, 0.16, 0.2, rot), cast=False)
-        if w >= 15:  # 큰 길: 가운데 노란 겹선 + 차선
-            for off in (-0.2, 0.2):
-                add_geo("yellow", line_mat, g_seg(pts[i], pts[i + 1], 0.15, 0.08, 1, offset=off), cast=False)
-            for off in (-w / 4, w / 4):
-                k = 0.0
-                while k < L - 3:  # 점선 차선
-                    a_ = (X0 + (X1 - X0) * k / L, Y0 + (Y1 - Y0) * k / L)
-                    b_ = (X0 + (X1 - X0) * (k + 3) / L, Y0 + (Y1 - Y0) * (k + 3) / L)
-                    add_geo("white", white_line_mat, g_seg(a_, b_, 0.15, 0.08, 1, offset=off), cast=False)
-                    k += 8
-        else:  # 좁은 길: 가운데 노란 실선
-            add_geo("yellow", line_mat, g_seg(pts[i], pts[i + 1], 0.15, 0.08, 1), cast=False)
+        k = i * 2
+        idx += [k, k + 2, k + 1, k + 1, k + 2, k + 3]
+    geo = THREE.BufferGeometry.new()
+    geo.setAttribute("position", THREE.BufferAttribute.new(Float32Array.new(to_js(pos)), 3))
+    geo.setAttribute("uv", THREE.BufferAttribute.new(Float32Array.new(to_js(uv)), 2))
+    geo.setIndex(to_js(idx))
+    geo.computeVertexNormals()
+    return geo
+
+
+def wall_strip(pts, d, y0, y1):
+    """받침대 옆면 (띠 가장자리에서 아래로)"""
+    line = cd.offset_line(pts, d)
+    pos, uv, idx = [], [], []
+    for i, p in enumerate(line):
+        pos += [wx(p[0]), y1, wz(p[1]), wx(p[0]), y0, wz(p[1])]
+        uv += [i, 1, i, 0]
+    for i in range(len(line) - 1):
+        k = i * 2
+        idx += [k, k + 1, k + 2, k + 2, k + 1, k + 3]
+    geo = THREE.BufferGeometry.new()
+    geo.setAttribute("position", THREE.BufferAttribute.new(Float32Array.new(to_js(pos)), 3))
+    geo.setAttribute("uv", THREE.BufferAttribute.new(Float32Array.new(to_js(uv)), 2))
+    geo.setIndex(to_js(idx))
+    geo.computeVertexNormals()
+    return geo
+
+
+def trimmed(road_i, end, by):
+    """곁길이 큰길과 만나는 끝을 by m 만큼 당긴 꺾은선"""
+    pts = list(road_lines[road_i])  # 앞에서 이미 당긴 끝은 그대로 두고
+    if end == 0:
+        (x0, y0), (x1, y1) = pts[0], pts[1]
+    else:
+        (x0, y0), (x1, y1) = pts[-1], pts[-2]
+    L = math.hypot(x1 - x0, y1 - y0)
+    p = (x0 + (x1 - x0) * by / L, y0 + (y1 - y0) * by / L)
+    if end == 0:
+        pts[0] = p
+    else:
+        pts[-1] = p
+    return pts
+
+
+road_lines = [list(r["pts"]) for r in cd.ROADS]
+for side_i, end, main_i in cd.JOINS:  # 곁길은 큰길 인도 바깥에서 멈추고, 입구만 아스팔트로 잇는다
+    road_lines[side_i] = trimmed(side_i, end, cd.ROADS[main_i]["w"] / 2 + 3)
+
+for i, road in enumerate(cd.ROADS):
+    pts, w = road_lines[i], road["w"]
+    half = w / 2
+    add_geo("asphalt", asphalt_mat, ribbon(pts, -half, half, 0.05, 10), cast=False)
+    for sgn in (1, -1):
+        add_geo("walk", walk_mat, ribbon(pts, sgn * half, sgn * (half + 3), 0.15, 2), cast=False)
+        add_geo("earth", earth_mat, wall_strip(pts, sgn * (half + 3), -4, 0.15), cast=False)
+    if w >= 14:  # 큰 길: 가운데 노란 겹선
+        for off in (-0.25, 0.1):
+            add_geo("yellow", line_mat, ribbon(pts, off, off + 0.15, 0.08, 1), cast=False)
+    else:
+        add_geo("yellow", line_mat, ribbon(pts, -0.08, 0.08, 0.08, 1), cast=False)
+    add_geo("earth", earth_mat, ribbon(pts, -half - 3, half + 3, -4, 10), cast=False)  # 받침 바닥
+
+for side_i, end, main_i in cd.JOINS:  # 교차로 입구: 큰길 쪽 인도를 덮는 아스팔트
+    full = cd.ROADS[side_i]["pts"]
+    a = full[0] if end == 0 else full[-1]
+    b = road_lines[side_i][0] if end == 0 else road_lines[side_i][-1]
+    add_geo("asphalt", asphalt_mat, ribbon([a, b], -cd.ROADS[side_i]["w"] / 2, cd.ROADS[side_i]["w"] / 2, 0.17, 10),
+            cast=False)
 
 
 def crosswalk(road, X, Y):
@@ -492,8 +547,7 @@ def crosswalk(road, X, Y):
     rot = math.atan2(uy, ux)
     for k in range(-4, 5):
         px, py = X0 + ux * (t + k * 1.0), Y0 + uy * (t + k * 1.0)
-        cx_, cy_ = px - (-uy) * 0, py
-        add_geo("white", white_line_mat, g_box(wx(px), 0.07, wz(py), 0.5, 0.04, w - 1, rot), cast=False)
+        add_geo("white", white_line_mat, g_box(wx(px), 0.09, wz(py), 0.5, 0.04, w - 1, rot), cast=False)
 
 
 crosswalk(cd.ROADS[2], *cd.GATES[0])   # 후문 앞 (염화로)
@@ -749,10 +803,11 @@ add_geo("white", white, g_box(sx, 4.2, sz, sw + 1.5, 0.2, sd))
 for k in range(0, int(sd), 10):
     add_geo("post", post_mat, THREE.CylinderGeometry.new(0.1, 0.1, 4.2, 8).translate(sx - sw / 2, 2.1, sz - sd / 2 + k))
 
-M = cd.MINI_PITCH
-for gy in (M[2] + 1.5, M[3] - 1.5):
-    for px in ((M[0] + M[1]) / 2 - 1.5, (M[0] + M[1]) / 2 + 1.5):
-        add_geo("white", white, THREE.CylinderGeometry.new(0.06, 0.06, 2, 8).translate(wx(px), 1, wz(gy)))
+C_ = cd.COURT  # 농구 골대 (코트 양 끝)
+for gx_ in (C_[0] + 1.2, C_[1] - 1.2):
+    cyl(wx(gx_), 1.7, wz((C_[2] + C_[3]) / 2), 0.09, 3.4, post_mat, 8)
+    box(wx(gx_ + (0.9 if gx_ < (C_[0] + C_[1]) / 2 else -0.9)), 3.4, wz((C_[2] + C_[3]) / 2), 0.05, 1.05, 1.8,
+        std(color="#ffffff", rough=0.3))
 
 pcx, pcz, _, _ = rect_cs(cd.PLAZA)
 stone = std(color="#cfc9bd", rough=0.85)
@@ -914,7 +969,7 @@ for m in (body_mesh, cabin_mesh, wheel_mesh):
 # ---------- 나무 ----------
 blocked = [expand(b["rect"], 3.5) for b in cd.BUILDINGS]
 blocked += [expand(r, 2) for r in cd.CORRIDORS] + paved
-blocked += [expand(cd.FIELD, 2), expand(cd.MINI_PITCH, 2), expand(cd.STANDS, 2), *garden_paths]
+blocked += [expand(cd.FIELD, 2), expand(cd.COURT, 2), expand(cd.STANDS, 2), *garden_paths, expand(cd.BACK_PATH, 1.5)]
 blocked += [expand(r[:4], 4) for r in cd.OTHER_SCHOOL]
 blocked += [expand((s0, s1, t0, t1), 4) for s0, s1, t0, t1, _ in cd.SLABS]
 trees = []  # (X, Y, 종류, 크기)

@@ -297,7 +297,7 @@ if LITE:
     document.querySelector("#mode").textContent = "안전 모드" if SAFE else "가벼운 모드"
 
 # 멈춰 있을 때는 선명하게, 움직이는 동안만 해상도를 낮춰서 부드럽게
-HI_DPR = 1 if SAFE else min(max(window.devicePixelRatio, 1.25), 1.5 if LITE else 2)
+HI_DPR = 1 if SAFE else min(max(window.devicePixelRatio, 1.25), 1.5 if LITE else 2)  # 이보다 높이면 일부 그래픽카드에서 3D가 멈춘다
 LO_DPR = 0.7 if SAFE else max(0.8, HI_DPR * 0.6)
 res = {"cur": HI_DPR, "last": 0.0}
 renderer.setPixelRatio(HI_DPR)
@@ -1117,7 +1117,7 @@ renderer.shadowMap.needsUpdate = True  # 진짜 그림자는 여기서 딱 한 �
 # ---------- 화면 조작 ----------
 gate_x, gate_y = cd.GATES[1]  # 화정로 정문
 VIEWS = {
-    "위": ((0.01, 360, 0.01), (0, 0, 0)),
+    "위": ((0, 360, 2), (0, 0, 0)),  # 북쪽이 위로
     "옆": ((0, 35, 300), (0, 10, 0)),
     "입체": ((-150, 140, 190), (0, 0, 0)),
     "정문": ((wx(gate_x), 1.7, wz(gate_y - 6)), (wx(30), 8, wz(30))),
